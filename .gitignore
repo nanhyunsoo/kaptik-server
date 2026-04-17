@@ -1,53 +1,22 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+# 환경변수
+.env
 
-# Virtual environments
+# 테스트 결과 파일
+test_result_*.txt
+
+# 캐시
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+
+# 오디오 테스트 파일
+test-audio/
+
+# Python 가상환경
 venv/
-ENV/
-env/
-.venv
+.venv/
 
 # IDE
-.vscode/
 .idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Logs
-*.log
-logs/
-
-# Models and data
-models/
-data/
-*.pkl
-*.pth
+.vscode/
