@@ -21,7 +21,8 @@ class DiartService:
     self.hf_token = hf_token
     self.pipeline = None
     self.audio_buffer = np.array([], dtype=np.float32)
-    self._chunk_size = int(SAMPLE_RATE * STEP)  # 0.5초 분량 샘플 수
+    self._window_size = int(SAMPLE_RATE * DURATION)  # 5초 윈도우 크기
+    self._step_size = int(SAMPLE_RATE * STEP)        # 0.5초 슬라이딩 스텝
 
   def initialize(self) -> None:
     """Diart 파이프라인 초기화 (모델 로드)"""
@@ -38,6 +39,7 @@ class DiartService:
           return Model.from_pretrained(model_id, use_auth_token=self.hf_token)
 
       # gated 모델 접근을 위해 토큰을 명시적으로 주입
+      # segmentation-3.0은 diart와 호환 안 됨 (logit 포맷 차이)
       segmentation_model = _load_model("pyannote/segmentation")
       embedding_model = _load_model("pyannote/embedding")
 
@@ -46,7 +48,7 @@ class DiartService:
         embedding=embedding_model,
         duration=DURATION,
         step=STEP,
-        latency="min",
+        latency=2.0,
       )
       self.pipeline = SpeakerDiarization(config)
       logger.info("Diart 파이프라인 초기화 완료")
@@ -72,23 +74,28 @@ class DiartService:
     new_samples = self._pcm_to_float(pcm_bytes)
     self.audio_buffer = np.concatenate([self.audio_buffer, new_samples])
 
-    # 충분한 샘플이 쌓이면 Diart에 처리 요청
+    # DURATION 크기 윈도우가 쌓이면 STEP만큼 슬라이딩하며 처리
     segments = []
-    while len(self.audio_buffer) >= self._chunk_size:
-      chunk = self.audio_buffer[:self._chunk_size]
-      self.audio_buffer = self.audio_buffer[self._chunk_size:]
+    while len(self.audio_buffer) >= self._window_size:
+      chunk = self.audio_buffer[:self._window_size]
+      self.audio_buffer = self.audio_buffer[self._step_size:]  # STEP만큼만 이동 (중첩 윈도우)
 
       try:
-        # Diart는 (1, samples) shape의 np.ndarray를 입력으로 받음
-        audio_array = chunk.reshape(1, -1)
-        annotation, _ = self.pipeline((audio_array, SAMPLE_RATE))
-        if annotation is not None:
-          for segment, _, label in annotation.itertracks(yield_label=True):
-            segments.append({
-              "speaker": label,       # "SPEAKER_0", "SPEAKER_1" 등
-              "start": segment.start,
-              "end": segment.end,
-            })
+        from pyannote.core import SlidingWindowFeature, SlidingWindow
+
+        # Diart는 SlidingWindowFeature 리스트를 입력으로 받음 (shape: samples x 1)
+        audio_array = np.ascontiguousarray(chunk.reshape(-1, 1))
+        sw = SlidingWindow(start=0.0, duration=1.0 / SAMPLE_RATE, step=1.0 / SAMPLE_RATE)
+        waveform = SlidingWindowFeature(audio_array, sw)
+        results = self.pipeline([waveform])
+        for annotation, _ in results:
+          if annotation is not None:
+            for segment, _, label in annotation.itertracks(yield_label=True):
+              segments.append({
+                "speaker": label,
+                "start": segment.start,
+                "end": segment.end,
+              })
       except Exception as e:
         logger.warning(f"Diart 청크 처리 오류: {str(e)}")
 
